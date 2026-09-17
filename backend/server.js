@@ -1,3 +1,4 @@
+const path = require('path');
 const express = require('express');
 const http = require('http');
 const { WebSocketServer } = require('ws');
@@ -8,6 +9,10 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Sirve la web (frontend/) desde el mismo servidor.
+const FRONTEND_DIR = path.join(__dirname, '..', 'frontend');
+app.use(express.static(FRONTEND_DIR));
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });

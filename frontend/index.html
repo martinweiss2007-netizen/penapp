@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PenApp ⚽ Alertas de tandas de penales</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚽</text></svg>" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon">⚽</span>
+      <div>
+        <h1>PenApp</h1>
+        <p class="tagline">Te avisamos apenas arranca una tanda de penales</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <span id="connStatus" class="status status-connecting">
+        <span class="dot"></span> Conectando…
+      </span>
+      <button id="notifyBtn" class="btn btn-primary">🔔 Activar avisos</button>
+      <button id="settingsBtn" class="btn btn-ghost" aria-label="Ajustes">⚙️</button>
+    </div>
+  </header>
+
+  <div id="settingsPanel" class="settings-panel hidden">
+    <label for="backendUrl">URL del backend (WebSocket)</label>
+    <div class="settings-row">
+      <input id="backendUrl" type="text" placeholder="ws://localhost:3001" />
+      <button id="saveSettings" class="btn btn-primary">Guardar</button>
+    </div>
+    <label class="switch-row">
+      <input type="checkbox" id="soundToggle" checked />
+      Sonido de alerta
+    </label>
+    <label class="switch-row">
+      <input type="checkbox" id="everyKickToggle" />
+      Avisar en cada penal (no solo al inicio de la tanda)
+    </label>
+  </div>
+
+  <div id="banner" class="banner hidden"></div>
+
+  <main>
+    <section id="shootoutSection" class="shootout-section hidden">
+      <h2>🚨 Tandas de penales en vivo</h2>
+      <div id="shootoutList" class="shootout-list"></div>
+    </section>
+
+    <section class="live-section">
+      <h2>Partidos en vivo <span id="liveCount" class="count-badge">0</span></h2>
+      <div id="liveList" class="live-list">
+        <p class="empty-state">Esperando datos del servidor…</p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Datos vía API-Football. Actualización cada 30s.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
