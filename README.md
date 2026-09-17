@@ -1,20 +1,20 @@
 # PenApp ⚽
 
-Web app que te avisa (notificación del navegador + sonido) apenas empieza una tanda de penales en un partido de fútbol en vivo, y te muestra el marcador de penales en tiempo real.
+Web app que te avisa (notificación del navegador + sonido) apenas empieza una tanda de penales en un partido de fútbol en vivo, y te muestra el progreso tiro a tiro.
 
 ## Cómo funciona
 
-- **`backend/`**: servidor Node/Express que cada 30 segundos consulta [football-data.org](https://www.football-data.org/) por partidos en vivo, detecta cuándo un partido entra en tanda de penales y transmite los eventos por WebSocket. También sirve la web estática.
-- **`frontend/`**: web (HTML/CSS/JS puro, sin build) que se conecta al WebSocket, muestra los partidos en vivo y las tandas activas, y dispara notificaciones del navegador + un sonido cuando arranca una tanda (y opcionalmente en cada penal convertido).
+- **`backend/`**: servidor Node/Express que consulta [API-Football](https://www.api-football.com/) por partidos en vivo (incluye ligas europeas, Libertadores, Sudamericana, Copa Argentina y cientos de competencias más), detecta cuándo un partido entra en tanda de penales y transmite los eventos por WebSocket. También sirve la web estática.
+- **`frontend/`**: web (HTML/CSS/JS puro, sin build) que se conecta al WebSocket, muestra los partidos en vivo y las tandas activas, y dispara notificaciones del navegador + un sonido cuando arranca una tanda (y opcionalmente en cada penal ejecutado).
 
 ## Puesta en marcha
 
-1. Conseguí una API key gratuita en https://www.football-data.org/client/register — solo pedís tu email y te la muestra al instante (sin marketplace, sin tarjeta).
+1. Conseguí una API key gratuita con el alta **directa** (sin pasar por el marketplace de RapidAPI): https://dashboard.api-football.com/register — te registrás con tu email, sin tarjeta, y la clave queda visible en tu dashboard al instante.
 2. Configurá el backend:
    ```bash
    cd backend
    cp .env.example .env
-   # editá .env y pegá tu FOOTBALL_DATA_KEY
+   # editá .env y pegá tu API_FOOTBALL_KEY
    npm install
    npm start
    ```
@@ -28,5 +28,5 @@ Si preferís servir el frontend con otra herramienta (Vite, Live Server, etc.), 
 ## Notas
 
 - Las notificaciones del navegador requieren HTTPS en producción (localhost funciona sin HTTPS).
-- El plan gratuito de football-data.org tiene límite de 10 requests/minuto y acceso a un subconjunto de competiciones (principales ligas europeas y torneos de selecciones); `POLL_INTERVAL` en `backend/server.js` controla la frecuencia de sondeo.
-- Esta API solo informa el marcador acumulado de penales convertidos (no el detalle gol/atajada de cada ejecución individual), así que el círculo de cada penal en la web se muestra siempre en verde.
+- El plan gratis de API-Football tiene un tope de **100 consultas/día**. Por eso el backend consulta cada 3 minutos (`POLL_INTERVAL` en `backend/server.js`) en vez de cada pocos segundos — así el cupo alcanza para varias horas seguidas de partido. Esto significa que el aviso puede demorar hasta ~3 minutos desde que arranca la tanda, no es instantáneo al segundo.
+- En Render (plan free), la instancia se "duerme" tras un rato sin visitas y tarda ~50s en despertar. Conviene abrir la web un rato antes de que arranque el partido que te interesa.
