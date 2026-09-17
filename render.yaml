@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: penapp
+    env: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: API_FOOTBALL_KEY
+        sync: false
