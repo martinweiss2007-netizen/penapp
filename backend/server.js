@@ -18,8 +18,8 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 // ─── CONFIG ────────────────────────────────────────────
-const API_KEY = process.env.API_FOOTBALL_KEY;
-const API_HOST = 'api-football-v1.p.rapidapi.com';
+const API_KEY = process.env.FOOTBALL_DATA_KEY;
+const API_BASE = 'https://api.football-data.org/v4';
 const POLL_INTERVAL = '*/30 * * * * *'; // cada 30 segundos
 
 // ─── ESTADO EN MEMORIA ─────────────────────────────────
@@ -36,99 +36,60 @@ function broadcast(data) {
   });
 }
 
-// ─── LLAMADA A API-FOOTBALL ───────────────────────────
-async function fetchLiveFixtures() {
+// ─── LLAMADA A FOOTBALL-DATA.ORG ───────────────────────
+async function fetchLiveMatches() {
   if (!API_KEY) {
-    console.error('❌ API_FOOTBALL_KEY no configurada en variables de entorno');
+    console.error('❌ FOOTBALL_DATA_KEY no configurada en variables de entorno');
     return null;
   }
   try {
-    const res = await axios.get('https://api-football-v1.p.rapidapi.com/v3/fixtures', {
-      params: { live: 'all' },
-      headers: {
-        'x-rapidapi-key': API_KEY,
-        'x-rapidapi-host': API_HOST,
-      },
+    const res = await axios.get(`${API_BASE}/matches`, {
+      params: { status: 'LIVE' },
+      headers: { 'X-Auth-Token': API_KEY },
       timeout: 10000,
     });
-    return res.data.response;
+    return res.data.matches;
   } catch (err) {
-    console.error('Error API-Football:', err.message);
+    console.error('Error football-data.org:', err.message);
     return null;
   }
 }
 
-async function fetchFixtureEvents(fixtureId) {
-  try {
-    const res = await axios.get('https://api-football-v1.p.rapidapi.com/v3/fixtures/events', {
-      params: { fixture: fixtureId },
-      headers: {
-        'x-rapidapi-key': API_KEY,
-        'x-rapidapi-host': API_HOST,
-      },
-      timeout: 10000,
-    });
-    return res.data.response;
-  } catch (err) {
-    console.error(`Error eventos fixture ${fixtureId}:`, err.message);
-    return [];
-  }
-}
-
-// ─── PROCESAR FIXTURES EN VIVO ─────────────────────────
+// ─── PROCESAR PARTIDOS EN VIVO ─────────────────────────
 async function processLiveFixtures() {
-  console.log(`[${new Date().toISOString()}] Polling API-Football...`);
+  console.log(`[${new Date().toISOString()}] Polling football-data.org...`);
 
-  const fixtures = await fetchLiveFixtures();
-  if (!fixtures) return;
+  const matches = await fetchLiveMatches();
+  if (!matches) return;
 
   const liveData = [];
 
-  for (const fixture of fixtures) {
-    const id = fixture.fixture.id;
-    const status = fixture.fixture.status.short;
-    const elapsed = fixture.fixture.status.elapsed;
+  for (const match of matches) {
+    const id = match.id;
+    const isShootout = match.score?.duration === 'PENALTY_SHOOTOUT';
+    const penHome = match.score?.penalties?.home;
+    const penAway = match.score?.penalties?.away;
 
     const matchData = {
       id,
-      competition: `${fixture.league.name} · ${fixture.league.country}`,
-      leagueLogo: fixture.league.logo,
-      teams: `${fixture.teams.home.name} vs ${fixture.teams.away.name}`,
-      home: fixture.teams.home.name,
-      away: fixture.teams.away.name,
-      homeLogo: fixture.teams.home.logo,
-      awayLogo: fixture.teams.away.logo,
-      homeScore: fixture.goals.home ?? 0,
-      awayScore: fixture.goals.away ?? 0,
-      minute: elapsed ? `${elapsed}'` : status,
-      status: 'live',
-      homePens: [],
-      awayPens: [],
-      penHomeScore: fixture.score?.penalty?.home ?? null,
-      penAwayScore: fixture.score?.penalty?.away ?? null,
+      competition: match.competition?.name || '',
+      leagueLogo: match.competition?.emblem || null,
+      teams: `${match.homeTeam.name} vs ${match.awayTeam.name}`,
+      home: match.homeTeam.name,
+      away: match.awayTeam.name,
+      homeLogo: match.homeTeam.crest || null,
+      awayLogo: match.awayTeam.crest || null,
+      homeScore: match.score?.fullTime?.home ?? 0,
+      awayScore: match.score?.fullTime?.away ?? 0,
+      minute: match.status === 'PAUSED' ? 'Entretiempo' : 'En vivo',
+      status: isShootout ? 'shootout' : 'live',
+      // football-data.org solo da el marcador acumulado de penales convertidos,
+      // no el detalle tiro a tiro (goal/miss) de cada ejecución.
+      homePens: penHome != null ? Array(penHome).fill('goal') : [],
+      awayPens: penAway != null ? Array(penAway).fill('goal') : [],
     };
 
-    // Detectar si hay tanda de penales activa
-    const isShootout = status === 'P' ||
-      (fixture.score?.penalty?.home !== null && fixture.score?.penalty?.home !== undefined);
-
     if (isShootout) {
-      matchData.status = 'shootout';
-
-      // Buscar eventos de la tanda
-      const events = await fetchFixtureEvents(id);
-      const penEvents = events.filter(e =>
-        e.type === 'pen_shootout_goal' || e.type === 'pen_shootout_miss'
-      );
-
-      // Separar por equipo
-      penEvents.forEach(ev => {
-        const isHome = ev.team.id === fixture.teams.home.id;
-        const result = ev.type === 'pen_shootout_goal' ? 'goal' : 'miss';
-        if (isHome) matchData.homePens.push(result);
-        else matchData.awayPens.push(result);
-      });
-
       // Si es la primera vez que detectamos esta tanda, notificar
       if (!notifiedShootouts.has(id)) {
         notifiedShootouts.add(id);
@@ -139,23 +100,17 @@ async function processLiveFixtures() {
         });
       }
 
-      // Detectar nuevos tiros respecto al cache anterior
+      // Detectar nuevos penales convertidos respecto al cache anterior
       const prev = fixtureCache.get(id);
       if (prev) {
         const prevTotal = prev.homePens.length + prev.awayPens.length;
         const currTotal = matchData.homePens.length + matchData.awayPens.length;
         if (currTotal > prevTotal) {
-          // Nuevo tiro
-          const lastHome = matchData.homePens[matchData.homePens.length - 1];
-          const lastAway = matchData.awayPens[matchData.awayPens.length - 1];
-          const lastResult = lastHome !== prev.homePens[prev.homePens.length - 1]
-            ? { team: matchData.home, result: lastHome }
-            : { team: matchData.away, result: lastAway };
-
+          const team = matchData.homePens.length > prev.homePens.length ? matchData.home : matchData.away;
           broadcast({
             type: 'NEW_PENALTY',
             fixture: matchData,
-            penalty: lastResult,
+            penalty: { team, result: 'goal' },
           });
         }
       }
@@ -172,15 +127,15 @@ async function processLiveFixtures() {
     timestamp: Date.now(),
   });
 
-  // Limpiar fixtures que ya no están en vivo
+  // Limpiar partidos que ya no están en vivo
   for (const [cachedId] of fixtureCache) {
-    if (!fixtures.find(f => f.fixture.id === cachedId)) {
+    if (!matches.find((m) => m.id === cachedId)) {
       fixtureCache.delete(cachedId);
       notifiedShootouts.delete(cachedId);
     }
   }
 
-  console.log(`✅ ${fixtures.length} partidos en vivo, ${liveData.filter(f => f.status === 'shootout').length} tandas activas`);
+  console.log(`✅ ${matches.length} partidos en vivo, ${liveData.filter((f) => f.status === 'shootout').length} tandas activas`);
 }
 
 // ─── WEBSOCKET ─────────────────────────────────────────
@@ -218,7 +173,7 @@ const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`\n🟢 PenApp backend corriendo en puerto ${PORT}`);
   console.log(`📡 WebSocket listo`);
-  console.log(`🔑 API Key: ${API_KEY ? '✅ configurada' : '❌ FALTA API_FOOTBALL_KEY'}\n`);
+  console.log(`🔑 API Key: ${API_KEY ? '✅ configurada' : '❌ FALTA FOOTBALL_DATA_KEY'}\n`);
 
   // Primer poll inmediato
   processLiveFixtures();

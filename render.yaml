@@ -7,5 +7,5 @@ services:
     buildCommand: npm install
     startCommand: npm start
     envVars:
-      - key: API_FOOTBALL_KEY
+      - key: FOOTBALL_DATA_KEY
         sync: false

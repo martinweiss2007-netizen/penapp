@@ -1,7 +1,7 @@
 {
   "name": "penapp-backend",
   "version": "1.0.0",
-  "description": "PenApp backend — polling API-Football + WebSocket",
+  "description": "PenApp backend — polling football-data.org + WebSocket",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
