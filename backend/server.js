@@ -5,6 +5,7 @@ const { WebSocketServer } = require('ws');
 const cron = require('node-cron');
 const axios = require('axios');
 const cors = require('cors');
+const webpush = require('web-push');
 
 const app = express();
 app.use(cors());
@@ -30,6 +31,45 @@ const POLL_INTERVAL = '0 */3 * * * *'; // cada 3 minutos
 const fixtureCache = new Map();
 // Partidos que ya notificamos como "tanda iniciada"
 const notifiedShootouts = new Set();
+// Suscripciones a notificaciones push (funcionan aunque la pestaña esté cerrada)
+const pushSubscriptions = new Map(); // endpoint -> subscription
+
+// ─── WEB PUSH (notificaciones aunque la app esté cerrada) ─
+// Si no hay claves VAPID configuradas, se generan al arrancar (se pierden
+// al reiniciar el servidor: conviene copiarlas como env vars permanentes,
+// ver el log de arranque).
+let vapidKeys = {
+  publicKey: process.env.VAPID_PUBLIC_KEY,
+  privateKey: process.env.VAPID_PRIVATE_KEY,
+};
+if (!vapidKeys.publicKey || !vapidKeys.privateKey) {
+  vapidKeys = webpush.generateVAPIDKeys();
+  console.log('\n⚠️  VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY no configuradas: generé un par nuevo.');
+  console.log('   Guardalas como variables de entorno para que las suscripciones no se pierdan al reiniciar:');
+  console.log(`   VAPID_PUBLIC_KEY=${vapidKeys.publicKey}`);
+  console.log(`   VAPID_PRIVATE_KEY=${vapidKeys.privateKey}\n`);
+}
+webpush.setVapidDetails(
+  process.env.VAPID_SUBJECT || 'mailto:penapp@example.com',
+  vapidKeys.publicKey,
+  vapidKeys.privateKey
+);
+
+async function sendPushToAll(payload) {
+  const body = JSON.stringify(payload);
+  for (const [endpoint, sub] of pushSubscriptions) {
+    try {
+      await webpush.sendNotification(sub, body);
+    } catch (err) {
+      // Suscripción vencida o inválida: la sacamos de la lista.
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        pushSubscriptions.delete(endpoint);
+      } else {
+        console.error('Error enviando push:', err.message);
+      }
+    }
+  }
+}
 
 // ─── BROADCAST A TODOS LOS CLIENTES WS ────────────────
 function broadcast(data) {
@@ -132,6 +172,11 @@ async function processLiveFixtures() {
           type: 'SHOOTOUT_START',
           fixture: matchData,
         });
+        sendPushToAll({
+          title: '🚨 ¡Tanda de penales!',
+          body: `${matchData.home} vs ${matchData.away} — ${matchData.competition}`,
+          tag: `shootout-${id}`,
+        });
       }
 
       // Detectar nuevos tiros respecto al cache anterior
@@ -206,6 +251,27 @@ app.get('/health', (req, res) => {
 
 app.get('/fixtures', (req, res) => {
   res.json(Array.from(fixtureCache.values()));
+});
+
+// ─── RUTAS DE NOTIFICACIONES PUSH ──────────────────────
+app.get('/vapid-public-key', (req, res) => {
+  res.json({ publicKey: vapidKeys.publicKey });
+});
+
+app.post('/subscribe', (req, res) => {
+  const sub = req.body;
+  if (!sub || !sub.endpoint) {
+    return res.status(400).json({ error: 'Suscripción inválida' });
+  }
+  pushSubscriptions.set(sub.endpoint, sub);
+  console.log(`🔔 Nueva suscripción push (total: ${pushSubscriptions.size})`);
+  res.status(201).json({ ok: true });
+});
+
+app.post('/unsubscribe', (req, res) => {
+  const { endpoint } = req.body || {};
+  pushSubscriptions.delete(endpoint);
+  res.json({ ok: true });
 });
 
 // ─── ARRANCAR ──────────────────────────────────────────

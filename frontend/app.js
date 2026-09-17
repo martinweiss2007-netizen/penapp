@@ -46,6 +46,9 @@
     localStorage.setItem('penapp.wsUrl', settings.wsUrl);
     settingsPanel.classList.add('hidden');
     connect();
+    if ('Notification' in window && Notification.permission === 'granted') {
+      subscribeToPush();
+    }
   });
 
   soundToggle.addEventListener('change', () => {
@@ -59,6 +62,51 @@
   });
 
   // ─── NOTIFICACIONES DEL NAVEGADOR ─────────────────────
+  function httpBase() {
+    return settings.wsUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
+  }
+
+  function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = atob(base64);
+    return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+  }
+
+  // true una vez que logramos suscripción push (notificaciones que llegan
+  // aunque la pestaña/navegador estén cerrados); si falla, seguimos usando
+  // solo la Notification API de la pestaña abierta.
+  let pushSubscribed = false;
+
+  async function subscribeToPush() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    try {
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      const keyRes = await fetch(`${httpBase()}/vapid-public-key`);
+      const { publicKey } = await keyRes.json();
+      if (!publicKey) return;
+
+      // Si ya había una suscripción (posiblemente con una clave vieja del
+      // servidor, que se regenera en cada reinicio), la renovamos.
+      const existing = await reg.pushManager.getSubscription();
+      if (existing) await existing.unsubscribe();
+
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      });
+
+      await fetch(`${httpBase()}/subscribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sub),
+      });
+      pushSubscribed = true;
+    } catch (e) {
+      console.warn('No se pudo activar la notificación push (se usará solo la de la pestaña abierta):', e);
+    }
+  }
+
   function updateNotifyBtn() {
     if (!('Notification' in window)) {
       notifyBtn.textContent = '🔕 No soportado';
@@ -82,13 +130,19 @@
     const perm = await Notification.requestPermission();
     updateNotifyBtn();
     if (perm === 'granted') {
+      await subscribeToPush();
       new Notification('PenApp', { body: 'Listo, te avisaremos apenas empiece una tanda de penales ⚽' });
     }
   });
 
   updateNotifyBtn();
+  // Si ya habías dado permiso antes, renovamos la suscripción push al abrir la web.
+  if ('Notification' in window && Notification.permission === 'granted') {
+    subscribeToPush();
+  }
 
   function notify(title, body) {
+    if (pushSubscribed) return; // la notificación push ya se encarga (llega incluso con la app cerrada)
     if ('Notification' in window && Notification.permission === 'granted') {
       try {
         const n = new Notification(title, { body, tag: title });
